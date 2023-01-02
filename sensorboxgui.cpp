@@ -83,9 +83,12 @@ void SensorBoxGUI::onStopButtonClicked(bool en)
     this->statusBar()->showMessage("Measurement stopped");
     port0LCD->display(QString::number(0));
     port1LCD->display(QString::number(0));
+    port0LCD_supply->setVisible(false);
+    port1LCD_supply->setVisible(false);
     lastSample = 0;
     measProcessState = MEAS_IDLE;
     this->measProcessStateMachine();
+
 }
 
 void SensorBoxGUI::measProcessStateMachine(void)
@@ -101,6 +104,7 @@ void SensorBoxGUI::measProcessStateMachine(void)
     }
     case SensorBoxGUI::SET_PORT_0_CONFIG_SUPPLY:
     {
+        port0LCD_supply->setVisible(true);
         txData.append((uint8_t)WRITE_CONFIG_FUNC);
         txData.append((uint8_t)PORT_0);
         txData.append((uint8_t)CONFIG_RADIO_SUPPLY);
@@ -121,6 +125,7 @@ void SensorBoxGUI::measProcessStateMachine(void)
     }
     case SensorBoxGUI::SET_PORT_1_CONFIG_SUPPLY:
     {
+        port1LCD_supply->setVisible(true);
         txData.append((uint8_t)WRITE_CONFIG_FUNC);
         txData.append((uint8_t)PORT_1);
         txData.append((uint8_t)CONFIG_RADIO_SUPPLY);
@@ -164,15 +169,13 @@ void SensorBoxGUI::measProcessStateMachine(void)
         txData.append((uint8_t)WRITE_CONFIG_FUNC);
         txData.append((uint8_t)PORT_0);
 
-        measType_t measType = (measType_t)port0Combo->currentIndex();
-
-        if (measType == MEAS_NTC10K || measType == MEAS_NTC5K)
+        if ((uint8_t)port0Combo->currentIndex() == CONFIG_RADIO_SUPPLY)
         {
-            txData.append((uint8_t)MEAS_NTC5K);
+            txData.append((uint8_t)CONFIG_RADIO_OUTPUT);
         }
         else
         {
-            txData.append((uint8_t)measType);
+            txData.append((uint8_t)port0Combo->currentIndex());
         }
 
         measProcessState = REQ_SAMPLE_PORT_0;
@@ -218,16 +221,15 @@ void SensorBoxGUI::measProcessStateMachine(void)
         txData.append((uint8_t)WRITE_CONFIG_FUNC);
         txData.append((uint8_t)PORT_1);
 
-        measType_t measType = (measType_t)port1Combo->currentIndex();
-
-        if (measType == MEAS_NTC10K || measType == MEAS_NTC5K)
+        if ((uint8_t)port1Combo->currentIndex() == CONFIG_RADIO_SUPPLY)
         {
-            txData.append((uint8_t)MEAS_NTC5K);
+            txData.append((uint8_t)CONFIG_RADIO_OUTPUT);
         }
         else
         {
-            txData.append((uint8_t)measType);
+            txData.append((uint8_t)port1Combo->currentIndex());
         }
+
 
         measProcessState = REQ_SAMPLE_PORT_1;
         break;
@@ -334,18 +336,35 @@ void SensorBoxGUI::doSampleProcessing(portNo_t portNo, uint16_t adcSample, uint1
     {
         valAndUnit = this->adc2valueConverter((measType_t)port0Combo->currentIndex(), adcSample, adcValueSupply);
 
-        qDebug() << "Port0 value: " << valAndUnit;
+        if (valAndUnit.at(2) != "")
+        {
+            port0LCD_supply->display(valAndUnit.at(2));
+            port0DisplLbl->setText("1. Supply, 2. Output [V]");;
+        }
+        else
+        {
+            port0DisplLbl->setText(valAndUnit.at(1));
+        }
+
         port0LCD->display(valAndUnit.at(0));
-        port0DisplLbl->setText(valAndUnit.at(1));
         break;
     }
     case SensorBoxGUI::PORT_1:
     {
         valAndUnit = this->adc2valueConverter((measType_t)port1Combo->currentIndex(), adcSample, adcValueSupply);
 
-        qDebug() << "Port1 value: " << valAndUnit;
+        if (valAndUnit.at(2) != "")
+        {
+            port1LCD_supply->display(valAndUnit.at(2));
+            port1DisplLbl->setText("1. Supply, 2. Output [V]");;
+        }
+        else
+        {
+            port1DisplLbl->setText(valAndUnit.at(1));
+        }
+
         port1LCD->display(valAndUnit.at(0));
-        port1DisplLbl->setText(valAndUnit.at(1));
+
         break;
     }
 
@@ -355,6 +374,7 @@ void SensorBoxGUI::doSampleProcessing(portNo_t portNo, uint16_t adcSample, uint1
 QStringList SensorBoxGUI::adc2valueConverter(const measType_t &measType, uint16_t adcValue, uint16_t adcValueSupply)
 {
     QString lcdNumberString{};
+    QString lcdNumberStringSupply{};
     QString portLblString{};
 
     double voltage    = (double)adcValue * 125e-6;
@@ -365,9 +385,16 @@ QStringList SensorBoxGUI::adc2valueConverter(const measType_t &measType, uint16_
     case SensorBoxGUI::MEAS_PT1000:
     {
         double resistance  = voltage/currentSourceValue;
-        double temperature = ((-R0 * A_PT1000) + std::sqrt((std::pow(R0, 2) * std::pow(A_PT1000, 2)) - (4*R0*B_PT1000*(R0 - resistance))))/(2*R0*B_PT1000);
-        double tempRounded = std::ceil(temperature * 10.0) / 10.0;
-        tempRounded += 0.2;
+
+        // PT1000
+        //double temperature = ((-R0 * A_PT1000) + std::sqrt((std::pow(R0, 2) * std::pow(A_PT1000, 2)) - (4*R0*B_PT1000*(R0 - resistance))))/(2*R0*B_PT1000);
+        //double tempRounded = std::ceil(temperature * 10.0) / 10.0;
+        //tempRounded += 0.2;
+
+
+        double tempRounded = 124.03 * log(resistance) - 827.17;
+
+
         lcdNumberString = QString("%1").arg(tempRounded, 0, 'f', 1);
         portLblString = "Temperature [°C]";
         break;
@@ -399,11 +426,11 @@ QStringList SensorBoxGUI::adc2valueConverter(const measType_t &measType, uint16_
     case SensorBoxGUI::MEAS_VOLTAGE:
     {
         const double R1 = 9090;
-        const double R2 = 1e3;
+        const double R2 = 1045;
 
         double voltOut = voltage * (R1+R2)/R2;
 
-        double voltOutRounded = std::ceil(voltOut * 10.0) / 10.0;
+        double voltOutRounded = std::ceil(voltOut * 100.0) / 100.0;
 
         lcdNumberString = QString("%1").arg(voltOutRounded, 0, 'f', 2);
         portLblString = "Voltage [V]";
@@ -412,17 +439,41 @@ QStringList SensorBoxGUI::adc2valueConverter(const measType_t &measType, uint16_
     }
     case SensorBoxGUI::MEAS_CURRENT:
     {
+
+        qDebug() << "Voltage from ADC: " << voltage;
+
+        const double Rc = 196;
+
+        double current = (voltage * 1e3) / Rc;
+        double currentOutRounded = std::ceil(current * 1000.0) / 1000.0;
+        currentOutRounded -= 0.17;
+        lcdNumberString = QString("%1").arg(currentOutRounded, 0, 'f', 3);
+        portLblString = "Current [A]";
         break;
     }
     case SensorBoxGUI::MEAS_RADIOMETRIC:
     {
-        (void)0;
+        const double r10k  = 10e3;
+        const double r26K1 = 26.1e3;
+        const double r1    = 9090;
+        const double r2    = 1045;
+
+        double vSupply = voltSupply * (r10k + r26K1)/r26K1;
+        double vOut = voltage * (r1+r2)/r2;
+
+        double vSupplyRounded = std::ceil(vSupply * 100.0) / 100.0;
+        double vOutRounded    = std::ceil(vOut * 100.0) / 100.0;
+
+        lcdNumberString       = QString("%1").arg(vSupplyRounded, 0, 'f', 3);
+        lcdNumberStringSupply = QString("%1").arg(vOutRounded, 0, 'f', 3);
+        qDebug() << "V supply: " << vSupplyRounded << ", V output: " << vOutRounded;
+
         break;
     }
 
     }
 
-    return QStringList() << lcdNumberString << portLblString;
+    return QStringList() << lcdNumberString << portLblString << lcdNumberStringSupply;
 }
 
 /**********************************************************************************************
@@ -521,10 +572,8 @@ QWidget *SensorBoxGUI::createDisplayResultsWidget()
 
     port0LCD = new QLCDNumber(10, displWidget);
     port1LCD = new QLCDNumber(10, displWidget);
-
-    port0LCD->setMode(QLCDNumber::Dec);
-    port0LCD->setSegmentStyle(QLCDNumber::Filled);
-    port0LCD->display(QString::number(0));
+    port0LCD_supply = new QLCDNumber(10, displWidget);
+    port1LCD_supply = new QLCDNumber(10, displWidget);
 
     QPalette palette0 = port0LCD->palette();
     palette0.setColor(QPalette::Normal, QPalette::WindowText, Qt::black);
@@ -532,6 +581,9 @@ QWidget *SensorBoxGUI::createDisplayResultsWidget()
     port0LCD->setAutoFillBackground(true);
     port0LCD->setPalette(palette0);
 
+    port0LCD->setMode(QLCDNumber::Dec);
+    port0LCD->setSegmentStyle(QLCDNumber::Filled);
+    port0LCD->display(QString::number(0));
 
     QPalette palette1 = port1LCD->palette();
     palette1.setColor(QPalette::Normal, QPalette::WindowText, Qt::black);
@@ -543,10 +595,38 @@ QWidget *SensorBoxGUI::createDisplayResultsWidget()
     port1LCD->setSegmentStyle(QLCDNumber::Filled);
     port1LCD->display(QString::number(0));
 
+
+    QPalette palette3 = port0LCD_supply->palette();
+    palette0.setColor(QPalette::Normal, QPalette::WindowText, Qt::black);
+    palette0.setColor(QPalette::Normal, QPalette::Window, Qt::green);
+    port0LCD_supply->setAutoFillBackground(true);
+    port0LCD_supply->setPalette(palette0);
+
+    port0LCD_supply->setMode(QLCDNumber::Dec);
+    port0LCD_supply->setSegmentStyle(QLCDNumber::Filled);
+    port0LCD_supply->display(QString::number(0));
+
+    QPalette palette4 = port1LCD_supply->palette();
+    palette1.setColor(QPalette::Normal, QPalette::WindowText, Qt::black);
+    palette1.setColor(QPalette::Normal, QPalette::Window, Qt::green);
+    port1LCD_supply->setAutoFillBackground(true);
+    port1LCD_supply->setPalette(palette1);
+
+    port1LCD_supply->setMode(QLCDNumber::Dec);
+    port1LCD_supply->setSegmentStyle(QLCDNumber::Filled);
+    port1LCD_supply->display(QString::number(0));
+
+
+    port0LCD_supply->setVisible(false);
+    port1LCD_supply->setVisible(false);
+
+
     displGrid->addWidget(port0DisplLbl, 0, 0);
     displGrid->addWidget(port0LCD, 0, 1);
-    displGrid->addWidget(port1DisplLbl, 1, 0);
-    displGrid->addWidget(port1LCD, 1, 1);
+    displGrid->addWidget(port0LCD_supply, 1, 1);
+    displGrid->addWidget(port1DisplLbl, 2, 0);
+    displGrid->addWidget(port1LCD, 2, 1);
+    displGrid->addWidget(port1LCD_supply, 3, 1);
 
     return displWidget;
 }
